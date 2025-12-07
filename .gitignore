@@ -1,0 +1,4 @@
+.vercel
+.env
+node_modules
+scholar-strem-firebase-admin-key.json     
