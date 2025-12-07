@@ -651,6 +651,21 @@ app.get("/reviews/:scholarshipId", async (req, res) => {
   }
 });
 
+app.get("/reviews", verifyJWT, verifyModerator, async (req, res) => {
+  try {
+    const reviews = await db
+      .collection("reviews")
+      .find({})
+      .sort({ reviewDate: -1 })
+      .toArray();
+
+    res.json(reviews);
+  } catch (err) {
+    console.error("GET /reviews error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 // ---------- ANALYTICS (admin) ----------
 app.get("/analytics/summary", verifyJWT, verifyAdmin, async (req, res) => {
   try {
