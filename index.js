@@ -585,33 +585,6 @@ app.get("/applications/:id", verifyJWT, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
-app.patch(
-  "/applications/feedback/:id",
-  verifyJWT,
-  verifyModerator,
-  async (req, res) => {
-    try {
-      const { feedbackText } = req.body;
-      const id = req.params.id;
-
-      const r = await db.collection("applications").updateOne(
-        { _id: new ObjectId(id) },
-        {
-          $set: {
-            feedback: feedbackText,
-            feedbackDate: new Date(),
-            feedbackBy: req.user.email,
-          },
-        }
-      );
-
-      res.json({ success: true, modifiedCount: r.modifiedCount });
-    } catch (err) {
-      console.error("PATCH feedback", err);
-      res.status(500).json({ message: "Server error" });
-    }
-  }
-);
 
 // ---------- REVIEWS ----------
 app.post("/reviews", verifyJWT, async (req, res) => {
@@ -665,6 +638,67 @@ app.get("/reviews", verifyJWT, verifyModerator, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+app.delete("/reviews/:id", verifyJWT, async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    if (!ObjectId.isValid(id))
+      return res.status(400).json({ message: "Invalid review ID" });
+
+    const review = await db
+      .collection("reviews")
+      .findOne({ _id: new ObjectId(id) });
+
+    if (!review) return res.status(404).json({ message: "Review not found" });
+
+    // Allow delete if:
+    // 1. Student deleting own review
+    // 2. Moderator/Admin deleting inappropriate content
+    const user = await db
+      .collection("users")
+      .findOne({ email: req.user.email });
+
+    if (review.userEmail !== req.user.email && user.role === "Student") {
+      return res.status(403).json({ message: "Not allowed" });
+    }
+
+    await db.collection("reviews").deleteOne({ _id: new ObjectId(id) });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("DELETE /reviews/:id error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Moderator adds feedback to an application
+app.patch(
+  "/applications/:id/feedback",
+  verifyJWT,
+  verifyModerator,
+  async (req, res) => {
+    try {
+      const id = req.params.id;
+      const { feedback } = req.body;
+
+      const r = await db.collection("applications").updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: {
+            feedback,
+            feedbackDate: new Date(),
+          },
+        }
+      );
+
+      res.json({ success: true, modifiedCount: r.modifiedCount });
+    } catch (err) {
+      console.error("PATCH feedback error:", err);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
 
 // ---------- ANALYTICS (admin) ----------
 app.get("/analytics/summary", verifyJWT, verifyAdmin, async (req, res) => {
