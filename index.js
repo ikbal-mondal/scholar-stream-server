@@ -198,6 +198,23 @@ app.patch("/users/:id/role", verifyJWT, verifyAdmin, async (req, res) => {
   }
 });
 
+app.delete("/users/:id", verifyJWT, verifyAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    await db.collection("users").deleteOne({ _id: new ObjectId(id) });
+
+    // Optional: also remove the user's applications & reviews
+    await db.collection("applications").deleteMany({ userId: id });
+    await db.collection("reviews").deleteMany({ userId: id });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("DELETE USER ERROR:", err);
+    res.status(500).json({ message: "Could not delete user" });
+  }
+});
+
 // ---------- SCHOLARSHIPS ----------
 // Latest 10 public
 app.get("/scholarships-latest", async (req, res) => {
@@ -474,6 +491,29 @@ app.get("/applications", verifyJWT, verifyModerator, async (req, res) => {
   }
 });
 
+app.patch(
+  "/applications/complete/:id",
+  verifyJWT,
+  verifyModerator,
+  async (req, res) => {
+    try {
+      const id = req.params.id;
+
+      const r = await db
+        .collection("applications")
+        .updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { applicationStatus: "completed", completedAt: new Date() } }
+        );
+
+      res.json({ success: true, modifiedCount: r.modifiedCount });
+    } catch (err) {
+      console.error("PATCH complete", err);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
 // Approve / Reject (moderator)
 app.patch(
   "/applications/approve/:id",
@@ -545,6 +585,33 @@ app.get("/applications/:id", verifyJWT, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+app.patch(
+  "/applications/feedback/:id",
+  verifyJWT,
+  verifyModerator,
+  async (req, res) => {
+    try {
+      const { feedbackText } = req.body;
+      const id = req.params.id;
+
+      const r = await db.collection("applications").updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: {
+            feedback: feedbackText,
+            feedbackDate: new Date(),
+            feedbackBy: req.user.email,
+          },
+        }
+      );
+
+      res.json({ success: true, modifiedCount: r.modifiedCount });
+    } catch (err) {
+      console.error("PATCH feedback", err);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
 
 // ---------- REVIEWS ----------
 app.post("/reviews", verifyJWT, async (req, res) => {
