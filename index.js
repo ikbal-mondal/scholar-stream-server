@@ -6,7 +6,12 @@ const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const admin = require("firebase-admin");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-const bodyParser = require("body-parser"); // used for webhook raw body
+// const bodyParser = require("body-parser"); // used for webhook raw body
+// export const config = {
+//   api: {
+//     bodyParser: false,
+//   },
+// };
 
 const app = express();
 
@@ -639,66 +644,20 @@ app.post("/create-payment-intent", verifyJWT, async (req, res) => {
  */
 app.post("/create-checkout-session", verifyJWT, async (req, res) => {
   try {
-    const { applicationId, scholarshipId, form, amount } = req.body;
+    const { applicationId } = req.body;
 
-    let appDoc = null;
-
-    if (applicationId) {
-      if (!ObjectId.isValid(applicationId))
-        return res.status(400).json({ message: "Invalid applicationId" });
-      appDoc = await db
-        .collection("applications")
-        .findOne({ _id: new ObjectId(applicationId) });
-      if (!appDoc)
-        return res.status(404).json({ message: "Application not found" });
-    } else {
-      // create application record first
-      if (!scholarshipId)
-        return res.status(400).json({
-          message: "scholarshipId required when no applicationId provided",
-        });
-
-      const scholarship = await db
-        .collection("scholarships")
-        .findOne({ _id: new ObjectId(scholarshipId) });
-      const userEmail = req.user?.email;
-      const userName = req.user?.name || (form && form.fullName) || "";
-
-      const newApp = {
-        scholarshipId: new ObjectId(scholarshipId),
-        userId: req.user?.uid || null,
-        userName,
-        userEmail,
-        userImage: req.user?.photoURL || (form && form.userImage) || "",
-        universityName: scholarship?.universityName || "",
-        scholarshipName: scholarship?.scholarshipName || "",
-        scholarshipCategory: scholarship?.scholarshipCategory || "",
-        degree: scholarship?.degree || "",
-        applicationFees: Number(scholarship?.applicationFees || 0),
-        serviceCharge: Number(scholarship?.serviceCharge || 0),
-        totalAmount: Number(
-          amount ||
-            scholarship?.applicationFees + scholarship?.serviceCharge ||
-            0
-        ),
-        formData: form || {},
-        applicationStatus: "pending",
-        paymentStatus: "unpaid",
-        applicationDate: new Date(),
-      };
-      const inserted = await db.collection("applications").insertOne(newApp);
-      appDoc = await db
-        .collection("applications")
-        .findOne({ _id: inserted.insertedId });
+    if (!applicationId || !ObjectId.isValid(applicationId)) {
+      return res.status(400).json({ message: "Invalid applicationId" });
     }
 
-    // Use amount: prefer appDoc.totalAmount, fallback to request amount
-    const totalAmount = Math.round(
-      Number(appDoc.totalAmount || amount || 0) * 100
-    ); // cents
-    if (!totalAmount || totalAmount <= 0) {
-      return res.status(400).json({ message: "Invalid total amount" });
-    }
+    const appDoc = await db
+      .collection("applications")
+      .findOne({ _id: new ObjectId(applicationId) });
+
+    if (!appDoc)
+      return res.status(404).json({ message: "Application not found" });
+
+    const totalAmount = Math.round(Number(appDoc.totalAmount || 0) * 100);
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
@@ -707,13 +666,11 @@ app.post("/create-checkout-session", verifyJWT, async (req, res) => {
         {
           price_data: {
             currency: "usd",
+            unit_amount: totalAmount,
             product_data: {
               name: `${appDoc.scholarshipName} — Application Fee`,
-              images: appDoc.universityImage
-                ? [appDoc.universityImage]
-                : undefined,
+              images: appDoc.universityImage ? [appDoc.universityImage] : [],
             },
-            unit_amount: totalAmount,
           },
           quantity: 1,
         },
@@ -722,108 +679,105 @@ app.post("/create-checkout-session", verifyJWT, async (req, res) => {
         applicationId: appDoc._id.toString(),
         userEmail: appDoc.userEmail,
       },
-      success_url: `${
-        process.env.FRONTEND_URL || "http://localhost:5173"
-      }/application-success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${
-        process.env.FRONTEND_URL || "http://localhost:5173"
-      }/apply-summary/${appDoc.scholarshipId}`,
+      success_url: `${process.env.FRONTEND_URL}/application-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.FRONTEND_URL}/dashboard/my-applications`,
     });
 
     res.json({ url: session.url, id: session.id });
   } catch (err) {
-    console.error("create-checkout-session err:", err);
-    res.status(500).json({
-      message: "Failed to create checkout session",
-      detail: err.message,
-    });
+    console.error("Error creating checkout session:", err);
+    res.status(500).json({ message: "Payment session failed" });
   }
 });
 
 // ---------- STRIPE WEBHOOK (raw body required) ----------
 
+const bodyParser = require("body-parser");
+
+// MUST COME BEFORE ANY app.use(express.json())
 app.post(
   "/webhook",
   bodyParser.raw({ type: "application/json" }),
   async (req, res) => {
     const sig = req.headers["stripe-signature"];
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
     if (!webhookSecret) {
-      console.error("No STRIPE_WEBHOOK_SECRET configured!");
-      // still respond 400 so Stripe knows
-      return res.status(400).send("Webhook secret not configured");
+      console.error("Missing STRIPE_WEBHOOK_SECRET");
+      return res.status(400).send("Webhook secret missing");
     }
 
     let event;
     try {
       event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
     } catch (err) {
-      console.error("Webhook signature verification failed.", err.message);
+      console.error("Invalid webhook signature:", err.message);
       return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    // Handle events
-    try {
-      if (event.type === "checkout.session.completed") {
-        const session = event.data.object;
-        const applicationId = session.metadata?.applicationId;
-        console.log(
-          "Webhook checkout.session.completed for application:",
-          applicationId
-        );
+    // --------------------
+    // HANDLE EVENT
+    // --------------------
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object;
+      const applicationId = session.metadata?.applicationId;
 
-        if (applicationId && ObjectId.isValid(applicationId)) {
-          const filter = { _id: new ObjectId(applicationId) };
-          const update = {
+      console.log("Webhook received → Application:", applicationId);
+
+      if (applicationId && ObjectId.isValid(applicationId)) {
+        await db.collection("applications").updateOne(
+          { _id: new ObjectId(applicationId) },
+          {
             $set: {
               paymentStatus: "paid",
-              applicationStatus: "processing", // or 'pending' or your desired default after payment
+              applicationStatus: "processing",
               paymentInfo: {
-                stripeSessionId: session.id,
-                paymentIntentId: session.payment_intent || null,
-                amount_total: (session.amount_total || 0) / 100,
+                sessionId: session.id,
+                paymentIntentId: session.payment_intent,
+                amountPaid: (session.amount_total || 0) / 100,
                 currency: session.currency,
-                paymentMethodTypes: session.payment_method_types || [],
-                sessionRaw: session,
+                method: session.payment_method_types || [],
                 paidAt: new Date(),
               },
             },
-          };
-          await db.collection("applications").updateOne(filter, update);
-          console.log("Application marked as paid:", applicationId);
-        } else {
-          console.warn("No valid applicationId in session metadata");
-        }
-      } else {
-      }
-    } catch (err) {
-      console.error("Error handling webhook event:", err);
+          }
+        );
 
-      return res.status(500).send("Webhook handler error");
+        console.log("Webhook: Payment updated ✔");
+      } else {
+        console.warn("⚠ No valid applicationId in session metadata");
+      }
     }
 
-    // acknowledge receipt
     res.json({ received: true });
   }
 );
 
 app.post("/payment-success", async (req, res) => {
-  const { applicationId } = req.body;
-
   try {
+    const { sessionId } = req.body;
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    const applicationId = session.metadata.applicationId;
+
+    if (!applicationId || !ObjectId.isValid(applicationId)) {
+      return res.status(400).json({ message: "Invalid applicationId" });
+    }
+
     await db.collection("applications").updateOne(
       { _id: new ObjectId(applicationId) },
       {
         $set: {
           paymentStatus: "paid",
           paymentDate: new Date(),
+          stripePaymentId: session.payment_intent,
         },
       }
     );
 
     return res.json({ success: true });
   } catch (err) {
-    console.error("Payment update error:", err);
+    console.error("payment-success error:", err);
     return res.status(500).json({ message: "Failed to update payment status" });
   }
 });
