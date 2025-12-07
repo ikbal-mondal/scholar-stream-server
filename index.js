@@ -800,6 +800,87 @@ app.get("/payments/student/:email", verifyJWT, async (req, res) => {
   }
 });
 
+// Get all reviews by logged-in student
+app.get("/my-reviews", verifyJWT, async (req, res) => {
+  try {
+    const email = req.user.email;
+
+    const reviews = await db
+      .collection("reviews")
+      .find({ userEmail: email })
+      .sort({ reviewDate: -1 })
+      .toArray();
+
+    res.json(reviews);
+  } catch (err) {
+    console.error("GET /my-reviews error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+app.put("/reviews/:id", verifyJWT, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { ratingPoint, reviewComment } = req.body;
+
+    if (!ObjectId.isValid(id))
+      return res.status(400).json({ message: "Invalid review ID" });
+
+    const review = await db
+      .collection("reviews")
+      .findOne({ _id: new ObjectId(id) });
+
+    if (!review) return res.status(404).json({ message: "Review not found" });
+
+    // Ensure student can edit only their own review
+    if (review.userEmail !== req.user.email) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
+
+    await db.collection("reviews").updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: {
+          ratingPoint: Number(ratingPoint),
+          reviewComment,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("PUT /reviews/:id error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+app.delete("/reviews/:id", verifyJWT, async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    if (!ObjectId.isValid(id))
+      return res.status(400).json({ message: "Invalid review ID" });
+
+    const review = await db
+      .collection("reviews")
+      .findOne({ _id: new ObjectId(id) });
+
+    if (!review) return res.status(404).json({ message: "Review not found" });
+
+    if (review.userEmail !== req.user.email) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
+
+    await db.collection("reviews").deleteOne({ _id: new ObjectId(id) });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("DELETE /reviews/:id error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 // ---------- FINISH / START ----------
 const port = process.env.PORT || 5000;
 app.listen(port, () => {
