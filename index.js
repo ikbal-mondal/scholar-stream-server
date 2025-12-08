@@ -726,6 +726,70 @@ app.get("/analytics/summary", verifyJWT, verifyAdmin, async (req, res) => {
 });
 
 app.get(
+  "/analytics/applications-by-university",
+  verifyJWT,
+  verifyAdmin,
+  async (req, res) => {
+    try {
+      const pipeline = [
+        {
+          $group: {
+            _id: "$universityName",
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { count: -1 } },
+      ];
+
+      const data = await db
+        .collection("applications")
+        .aggregate(pipeline)
+        .toArray();
+      res.json(data);
+    } catch (err) {
+      console.error("University analytics error:", err);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+app.get(
+  "/analytics/applications-by-category",
+  verifyJWT,
+  verifyAdmin,
+  async (req, res) => {
+    try {
+      const pipeline = [
+        {
+          $lookup: {
+            from: "scholarships",
+            localField: "scholarshipId",
+            foreignField: "_id",
+            as: "schData",
+          },
+        },
+        { $unwind: "$schData" },
+        {
+          $group: {
+            _id: "$schData.scholarshipCategory",
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { count: -1 } },
+      ];
+
+      const data = await db
+        .collection("applications")
+        .aggregate(pipeline)
+        .toArray();
+      res.json(data);
+    } catch (err) {
+      console.error("Category analytics error:", err);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
+app.get(
   "/analytics/top-scholarships",
   verifyJWT,
   verifyAdmin,
