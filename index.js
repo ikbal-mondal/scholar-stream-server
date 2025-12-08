@@ -212,31 +212,42 @@ app.delete("/users/:id", verifyJWT, verifyAdmin, async (req, res) => {
 app.patch("/users/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, country, phone, dob, college, photoURL } = req.body;
 
+    // Validate ID
+    if (!ObjectId.isValid(id)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid user ID" });
+    }
+
+    const oid = new ObjectId(id);
     const usersColl = db.collection("users");
 
-    await usersColl.updateOne(
-      { _id: new ObjectId(id) },
-      {
-        $set: {
-          name,
-          country,
-          phone,
-          dob,
-          college,
-          photoURL,
-          updatedAt: new Date(),
-        },
-      }
-    );
+    const updatedData = {
+      name: req.body.name,
+      country: req.body.country,
+      phone: req.body.phone,
+      dob: req.body.dob,
+      college: req.body.college,
+      photoURL: req.body.photoURL,
+      updatedAt: new Date(),
+    };
 
-    const updatedUser = await usersColl.findOne({ _id: new ObjectId(id) });
+    await usersColl.updateOne({ _id: oid }, { $set: updatedData });
 
-    res.json({ message: "Profile updated", user: updatedUser });
+    const updatedUser = await usersColl.findOne({ _id: oid });
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile updated",
+      user: updatedUser,
+    });
   } catch (err) {
     console.error("update-user error:", err);
-    res.status(500).json({ message: "Error updating profile" });
+    return res.status(500).json({
+      success: false,
+      message: "Error updating profile",
+    });
   }
 });
 
