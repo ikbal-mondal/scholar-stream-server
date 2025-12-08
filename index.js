@@ -7,7 +7,6 @@ const cors = require("cors");
 const admin = require("firebase-admin");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
-
 const app = express();
 
 // ---------- CORS / Body parsing ----------
@@ -207,6 +206,37 @@ app.delete("/users/:id", verifyJWT, verifyAdmin, async (req, res) => {
   } catch (err) {
     console.error("DELETE USER ERROR:", err);
     res.status(500).json({ message: "Could not delete user" });
+  }
+});
+
+app.patch("/users/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, country, phone, dob, college, photoURL } = req.body;
+
+    const usersColl = db.collection("users");
+
+    await usersColl.updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: {
+          name,
+          country,
+          phone,
+          dob,
+          college,
+          photoURL,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    const updatedUser = await usersColl.findOne({ _id: new ObjectId(id) });
+
+    res.json({ message: "Profile updated", user: updatedUser });
+  } catch (err) {
+    console.error("update-user error:", err);
+    res.status(500).json({ message: "Error updating profile" });
   }
 });
 
