@@ -1120,6 +1120,79 @@ app.delete("/reviews/:id", verifyJWT, async (req, res) => {
   }
 });
 
+
+// Contact Inquiry CRUD
+
+app.post("/contact", async (req, res) => {
+  try {
+    const { name, email, message } = req.body;
+
+    if (!name || !email || !message) {
+      return res.status(400).json({ success: false, message: "All fields required" });
+    }
+
+    const inquiries = db.collection("inquiries");
+
+    const newInquiry = {
+      name,
+      email,
+      message,
+      createdAt: new Date(),
+    };
+
+    const result = await inquiries.insertOne(newInquiry);
+
+    res.json({ success: true, message: "Message sent successfully", id: result.insertedId });
+  } catch (err) {
+    console.error("contact error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.get("/contact", async (req, res) => {
+  try {
+    const inquiries = db.collection("inquiries");
+    const result = await inquiries.find().sort({ createdAt: -1 }).toArray();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Failed to load inquiries" });
+  }
+});
+
+
+app.get("/contact/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const inquiries = db.collection("inquiries");
+
+    const item = await inquiries.findOne({ _id: new ObjectId(id) });
+    res.json(item);
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Not found" });
+  }
+});
+
+
+app.delete("/contact/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const inquiries = db.collection("inquiries");
+
+    await inquiries.deleteOne({ _id: new ObjectId(id) });
+
+    res.json({ success: true, message: "Deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Delete failed" });
+  }
+});
+
+
+
+
+
+
+
+
 // ---------- FINISH / START ----------
 const port = process.env.PORT || 5000;
 app.listen(port, () => {
