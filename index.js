@@ -725,6 +725,29 @@ app.get("/analytics/summary", verifyJWT, verifyAdmin, async (req, res) => {
   }
 });
 
+app.get(
+  "/analytics/top-scholarships",
+  verifyJWT,
+  verifyAdmin,
+  async (req, res) => {
+    try {
+      const pipeline = [
+        { $group: { _id: "$scholarshipId", totalApplications: { $sum: 1 } } },
+        { $sort: { totalApplications: -1 } },
+        { $limit: 5 },
+      ];
+
+      const data = await db
+        .collection("applications")
+        .aggregate(pipeline)
+        .toArray();
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
 // ---------- STRIPE: PaymentIntent (optional) ----------
 app.post("/create-payment-intent", verifyJWT, async (req, res) => {
   try {
