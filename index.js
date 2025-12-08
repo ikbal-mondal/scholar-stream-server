@@ -6,12 +6,7 @@ const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const admin = require("firebase-admin");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-// const bodyParser = require("body-parser"); // used for webhook raw body
-// export const config = {
-//   api: {
-//     bodyParser: false,
-//   },
-// };
+
 
 const app = express();
 
