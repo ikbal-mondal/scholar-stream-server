@@ -6,17 +6,18 @@ const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const admin = require("firebase-admin");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-
+const bodyParser = require("body-parser");
 const app = express();
 
-// ---------- CORS / Body parsing ----------
-// Keep webhook raw; other routes use JSON. We'll register webhook route with bodyParser.raw.
-// For normal endpoints:
 app.use(cors({ origin: process.env.FRONTEND_URL || true }));
 app.use(express.urlencoded({ extended: true }));
-app.use(express.json()); // for all regular JSON requests
+app.use(express.json());
 
-// ---------- Firebase Admin (optional) ----------
+// git add .
+// git commit -m "Deploy latest update"
+// git push origin main
+
+// ---------- Firebase Admin  ----------
 try {
   const firebaseConfig = {
     projectId: process.env.FIREBASE_PROJECT_ID,
@@ -69,7 +70,7 @@ function verifyJWT(req, res, next) {
   const token = auth.split(" ")[1];
   jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
     if (err) return res.status(403).json({ message: "Invalid token" });
-    req.user = decoded; // { uid, email, role, name, ... } depending on how you signed
+    req.user = decoded;
     next();
   });
 }
@@ -140,7 +141,7 @@ app.post("/auth/register-user", async (req, res) => {
   }
 });
 
-// Firebase login -> issue backend JWT (expects idToken from client)
+// Firebase login
 app.post("/auth/firebase-login", async (req, res) => {
   const { idToken } = req.body;
   if (!idToken) return res.status(400).json({ message: "idToken missing" });
@@ -197,8 +198,6 @@ app.delete("/users/:id", verifyJWT, verifyAdmin, async (req, res) => {
     const id = req.params.id;
 
     await db.collection("users").deleteOne({ _id: new ObjectId(id) });
-
-    // Optional: also remove the user's applications & reviews
     await db.collection("applications").deleteMany({ userId: id });
     await db.collection("reviews").deleteMany({ userId: id });
 
@@ -213,7 +212,6 @@ app.patch("/users/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Validate ID
     if (!ObjectId.isValid(id)) {
       return res
         .status(400)
@@ -436,14 +434,12 @@ app.get("/scholarships", async (req, res) => {
 });
 
 // ---------- APPLICATIONS ----------
-// Create application (student). Frontend may call this BEFORE payment to generate application record.
-// If you prefer create-on-checkout, see /create-checkout-session which can create application when needed.
+// Create application (student).
 app.post("/applications", verifyJWT, async (req, res) => {
   try {
     const dbApp = db.collection("applications");
     const body = req.body;
 
-    // validate scholarshipId
     let scholarshipObjectId;
     try {
       scholarshipObjectId = new ObjectId(body.scholarshipId);
@@ -454,7 +450,6 @@ app.post("/applications", verifyJWT, async (req, res) => {
     const newApplication = {
       scholarshipId: scholarshipObjectId,
 
-      // 🔥 FIXED: userId is NOT ObjectId
       userId: req.user.uid,
       userName: body.userName,
       userEmail: body.userEmail,
@@ -486,11 +481,11 @@ app.post("/applications", verifyJWT, async (req, res) => {
 });
 
 // Get applications for a student (by email)
-// NOTE: verifyJWT ensures the user is authenticated; you might want to confirm req.user.email === params.email or restrict to own user
+
 app.get("/applications/student/:email", verifyJWT, async (req, res) => {
   try {
     const email = req.params.email;
-    // only allow fetching if requester matches email OR is moderator/admin
+
     if (req.user?.email !== email) {
       // check role
       const user = await db
@@ -761,94 +756,7 @@ app.get("/analytics/summary", verifyJWT, verifyAdmin, async (req, res) => {
   }
 });
 
-app.get(
-  "/analytics/applications-by-university",
-  verifyJWT,
-  verifyAdmin,
-  async (req, res) => {
-    try {
-      const pipeline = [
-        {
-          $group: {
-            _id: "$universityName",
-            count: { $sum: 1 },
-          },
-        },
-        { $sort: { count: -1 } },
-      ];
-
-      const data = await db
-        .collection("applications")
-        .aggregate(pipeline)
-        .toArray();
-      res.json(data);
-    } catch (err) {
-      console.error("University analytics error:", err);
-      res.status(500).json({ message: "Server error" });
-    }
-  }
-);
-app.get(
-  "/analytics/applications-by-category",
-  verifyJWT,
-  verifyAdmin,
-  async (req, res) => {
-    try {
-      const pipeline = [
-        {
-          $lookup: {
-            from: "scholarships",
-            localField: "scholarshipId",
-            foreignField: "_id",
-            as: "schData",
-          },
-        },
-        { $unwind: "$schData" },
-        {
-          $group: {
-            _id: "$schData.scholarshipCategory",
-            count: { $sum: 1 },
-          },
-        },
-        { $sort: { count: -1 } },
-      ];
-
-      const data = await db
-        .collection("applications")
-        .aggregate(pipeline)
-        .toArray();
-      res.json(data);
-    } catch (err) {
-      console.error("Category analytics error:", err);
-      res.status(500).json({ message: "Server error" });
-    }
-  }
-);
-
-app.get(
-  "/analytics/top-scholarships",
-  verifyJWT,
-  verifyAdmin,
-  async (req, res) => {
-    try {
-      const pipeline = [
-        { $group: { _id: "$scholarshipId", totalApplications: { $sum: 1 } } },
-        { $sort: { totalApplications: -1 } },
-        { $limit: 5 },
-      ];
-
-      const data = await db
-        .collection("applications")
-        .aggregate(pipeline)
-        .toArray();
-      res.json(data);
-    } catch (error) {
-      res.status(500).json({ message: "Server error" });
-    }
-  }
-);
-
-// ---------- STRIPE: PaymentIntent (optional) ----------
+// ---------- STRIPE: PaymentIntent  ----------
 app.post("/create-payment-intent", verifyJWT, async (req, res) => {
   try {
     const { amount, currency = "usd", applicationId } = req.body;
@@ -872,15 +780,6 @@ app.post("/create-payment-intent", verifyJWT, async (req, res) => {
   }
 });
 
-/**
- * /create-checkout-session
- * Accepts:
- *  - applicationId (if existing application created on server)
- * OR
- *  - scholarshipId + form + amount (frontend can submit form + amount, we create application then session)
- *
- * Returns { url, id }
- */
 app.post("/create-checkout-session", verifyJWT, async (req, res) => {
   try {
     const { applicationId } = req.body;
@@ -930,8 +829,6 @@ app.post("/create-checkout-session", verifyJWT, async (req, res) => {
 });
 
 // ---------- STRIPE WEBHOOK (raw body required) ----------
-
-const bodyParser = require("body-parser");
 
 // MUST COME BEFORE ANY app.use(express.json())
 app.post(
@@ -1071,7 +968,6 @@ app.put("/reviews/:id", verifyJWT, async (req, res) => {
 
     if (!review) return res.status(404).json({ message: "Review not found" });
 
-    // Ensure student can edit only their own review
     if (review.userEmail !== req.user.email) {
       return res.status(403).json({ message: "Not allowed" });
     }
@@ -1120,7 +1016,6 @@ app.delete("/reviews/:id", verifyJWT, async (req, res) => {
   }
 });
 
-
 // Contact Inquiry CRUD
 
 app.post("/contact", async (req, res) => {
@@ -1128,7 +1023,9 @@ app.post("/contact", async (req, res) => {
     const { name, email, message } = req.body;
 
     if (!name || !email || !message) {
-      return res.status(400).json({ success: false, message: "All fields required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "All fields required" });
     }
 
     const inquiries = db.collection("inquiries");
@@ -1142,7 +1039,11 @@ app.post("/contact", async (req, res) => {
 
     const result = await inquiries.insertOne(newInquiry);
 
-    res.json({ success: true, message: "Message sent successfully", id: result.insertedId });
+    res.json({
+      success: true,
+      message: "Message sent successfully",
+      id: result.insertedId,
+    });
   } catch (err) {
     console.error("contact error:", err);
     res.status(500).json({ success: false, message: "Server error" });
@@ -1155,10 +1056,11 @@ app.get("/contact", async (req, res) => {
     const result = await inquiries.find().sort({ createdAt: -1 }).toArray();
     res.json(result);
   } catch (err) {
-    res.status(500).json({ success: false, message: "Failed to load inquiries" });
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to load inquiries" });
   }
 });
-
 
 app.get("/contact/:id", async (req, res) => {
   try {
@@ -1171,7 +1073,6 @@ app.get("/contact/:id", async (req, res) => {
     res.status(500).json({ success: false, message: "Not found" });
   }
 });
-
 
 app.delete("/contact/:id", async (req, res) => {
   try {
@@ -1186,14 +1087,7 @@ app.delete("/contact/:id", async (req, res) => {
   }
 });
 
-
-
-
-
-
-
-
-// ---------- FINISH / START ----------
+// ---------- FINISH  ----------
 const port = process.env.PORT || 5000;
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
