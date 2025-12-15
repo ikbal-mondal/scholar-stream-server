@@ -141,30 +141,6 @@ app.post("/auth/register-user", async (req, res) => {
   }
 });
 
-// Firebase login
-// app.post("/auth/firebase-login", async (req, res) => {
-//   const { idToken } = req.body;
-//   if (!idToken) return res.status(400).json({ message: "idToken missing" });
-
-//   try {
-//     if (!admin.apps.length)
-//       return res.status(500).json({ message: "Firebase not configured" });
-//     const decoded = await admin.auth().verifyIdToken(idToken);
-//     const { uid, email } = decoded;
-//     const usersColl = db.collection("users");
-//     const user = await usersColl.findOne({ email });
-//     if (!user)
-//       return res.status(404).json({
-//         message: "User profile not found. Please complete registration.",
-//       });
-//     const token = signJWT({ uid, email, role: user.role, name: user.name });
-//     res.json({ token, user: { ...user, uid } });
-//   } catch (err) {
-//     console.error("firebase-login err:", err);
-//     res.status(401).json({ message: "Firebase login failed" });
-//   }
-// });
-
 app.post("/auth/firebase-login", async (req, res) => {
   const { idToken } = req.body;
   if (!idToken) return res.status(400).json({ message: "idToken missing" });
@@ -179,7 +155,6 @@ app.post("/auth/firebase-login", async (req, res) => {
     const usersColl = db.collection("users");
     let user = await usersColl.findOne({ email });
 
-    // 🔥 Auto-create user if not exists
     if (!user) {
       const newUser = {
         name: name || "",
